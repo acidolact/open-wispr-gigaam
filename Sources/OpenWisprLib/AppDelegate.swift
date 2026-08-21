@@ -243,6 +243,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             whisperPrompt: config.whisperPrompt
         )
         transcriber.spokenPunctuation = config.spokenPunctuation?.value ?? false
+        if let raw = config.whisperServerURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty,
+           let url = URL(string: raw) {
+            transcriber.serverURL = url
+            transcriber.beamSize = config.whisperBeamSize
+            print("whisper-server mode: \(url.absoluteString) (beam_size: \(config.whisperBeamSize.map(String.init) ?? "server default"))")
+        }
         return transcriber
     }
 

@@ -16,6 +16,8 @@ public struct Config: Codable {
     public var toggleMode: FlexBool?
     public var audioInputDeviceID: UInt32?
     public var audioInputDeviceUID: String?
+    public var whisperServerURL: String?
+    public var whisperBeamSize: Int?
 
     public var hotkey: HotkeyConfig {
         get { hotkeys[0] }
@@ -48,6 +50,8 @@ public struct Config: Codable {
         case toggleMode
         case audioInputDeviceID
         case audioInputDeviceUID
+        case whisperServerURL
+        case whisperBeamSize
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,6 +74,8 @@ public struct Config: Codable {
         self.toggleMode = try c.decodeIfPresent(FlexBool.self, forKey: .toggleMode)
         self.audioInputDeviceID = try c.decodeIfPresent(UInt32.self, forKey: .audioInputDeviceID)
         self.audioInputDeviceUID = try c.decodeIfPresent(String.self, forKey: .audioInputDeviceUID)
+        self.whisperServerURL = try c.decodeIfPresent(String.self, forKey: .whisperServerURL)
+        self.whisperBeamSize = try c.decodeIfPresent(Int.self, forKey: .whisperBeamSize)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -85,6 +91,8 @@ public struct Config: Codable {
         try c.encodeIfPresent(toggleMode, forKey: .toggleMode)
         try c.encodeIfPresent(audioInputDeviceID, forKey: .audioInputDeviceID)
         try c.encodeIfPresent(audioInputDeviceUID, forKey: .audioInputDeviceUID)
+        try c.encodeIfPresent(whisperServerURL, forKey: .whisperServerURL)
+        try c.encodeIfPresent(whisperBeamSize, forKey: .whisperBeamSize)
     }
 
     public init(
@@ -97,7 +105,9 @@ public struct Config: Codable {
         maxRecordings: Int?,
         toggleMode: FlexBool?,
         audioInputDeviceID: UInt32? = nil,
-        audioInputDeviceUID: String? = nil
+        audioInputDeviceUID: String? = nil,
+        whisperServerURL: String? = nil,
+        whisperBeamSize: Int? = nil
     ) {
         self.hotkeys = hotkeys.isEmpty
             ? [HotkeyConfig(keyCode: 63, modifiers: [])]
@@ -111,6 +121,8 @@ public struct Config: Codable {
         self.toggleMode = toggleMode
         self.audioInputDeviceID = audioInputDeviceID
         self.audioInputDeviceUID = audioInputDeviceUID
+        self.whisperServerURL = whisperServerURL
+        self.whisperBeamSize = whisperBeamSize
     }
 
     public static let supportedLanguages: [LanguageOption] = [

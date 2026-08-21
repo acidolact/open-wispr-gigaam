@@ -6,13 +6,62 @@ public class Transcriber {
     private let whisperPrompt: String?
     public var spokenPunctuation: Bool = false
 
+    /// When set, transcription is delegated to a persistent whisper-server
+    /// (POST <serverURL>/inference, multipart "file" field) instead of
+    /// spawning whisper-cli per dictation. This removes the ~1 s model-load
+    /// cost and keeps the Metal context warm between requests.
+    public var serverURL: URL?
+
+    /// Optional beam_size override sent to the server (default: server default, 5).
+    public var beamSize: Int?
+
+    /// Injectable for tests.
+    public var session: URLSession = .shared
+
     public init(modelSize: String = "base.en", language: String = "en", whisperPrompt: String? = nil) {
         self.modelSize = modelSize
         self.language = language
         self.whisperPrompt = whisperPrompt
     }
 
+    /// Injectable fallback used when the whisper-server is unreachable at the
+    /// network level (connection refused / host not found / timeout). Defaults
+    /// to the built-in whisper-cli path; overridable in tests.
+    public var connectionFailureFallback: ((URL) throws -> String)?
+
     public func transcribe(audioURL: URL) throws -> String {
+        if let serverURL {
+            do {
+                return try transcribeViaServer(audioURL: audioURL, serverURL: serverURL)
+            } catch let error as TranscriberError where Self.isConnectionFailure(error) {
+                fputs("whisper-server unavailable (\(error)); falling back to whisper-cli\n", stderr)
+                if let fallback = connectionFailureFallback {
+                    return try fallback(audioURL)
+                }
+                return try transcribeViaCLI(audioURL: audioURL)
+            } catch {
+                throw error
+            }
+        }
+        return try transcribeViaCLI(audioURL: audioURL)
+    }
+
+    /// True when the error is a network-level failure to reach the server,
+    /// as opposed to an application-level (HTTP 5xx / bad payload) failure.
+    private static func isConnectionFailure(_ error: TranscriberError) -> Bool {
+        guard case .serverUnavailable(let code) = error, let code else { return false }
+        let connectionCodes: Set<Int> = [
+            URLError.cannotConnectToHost.rawValue,
+            URLError.networkConnectionLost.rawValue,
+            URLError.timedOut.rawValue,
+            URLError.notConnectedToInternet.rawValue,
+            URLError.cannotFindHost.rawValue,
+        ]
+        return connectionCodes.contains(code)
+    }
+
+    /// Spawns whisper-cli to transcribe the audio file.
+    func transcribeViaCLI(audioURL: URL) throws -> String {
         guard let whisperPath = Transcriber.findWhisperBinary() else {
             throw TranscriberError.whisperNotFound
         }
@@ -53,6 +102,115 @@ public class Transcriber {
         }
 
         return output
+    }
+
+    /// Synchronous wrapper over URLSession.dataTask.
+    /// Only used from background queues (transcription runs off the main thread).
+    static func dataSynchronously(for request: URLRequest, session: URLSession) throws -> (Data, URLResponse?) {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: (Data, URLResponse?, Error?) = (Data(), nil, nil)
+
+        let task = session.dataTask(with: request) { data, response, error in
+            result = (data ?? Data(), response, error)
+            semaphore.signal()
+        }
+        task.resume()
+        semaphore.wait()
+
+        if let error = result.2 {
+            if let urlError = error as? URLError {
+                throw TranscriberError.serverUnavailable(code: urlError.code.rawValue)
+            }
+            throw TranscriberError.transcriptionFailed
+        }
+        return (result.0, result.1)
+    }
+
+    // MARK: - whisper-server mode
+
+    private func transcribeViaServer(audioURL: URL, serverURL: URL) throws -> String {
+        let endpoint = serverURL.appendingPathComponent("inference")
+        let boundary = "openwispr-\(UUID().uuidString)"
+        let (body, contentType) = try Self.buildMultipartBody(
+            audioURL: audioURL,
+            boundary: boundary,
+            language: language,
+            prompt: effectiveWhisperPrompt,
+            beamSize: beamSize
+        )
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let (data, response) = try Self.dataSynchronously(for: request, session: session)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            fputs("whisper-server: request failed (\(String(data: data, encoding: .utf8) ?? "no response"))\n", stderr)
+            throw TranscriberError.transcriptionFailed
+        }
+
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = object["text"] as? String else {
+            fputs("whisper-server: unexpected response: \(String(data: data, encoding: .utf8) ?? "")\n", stderr)
+            throw TranscriberError.transcriptionFailed
+        }
+
+        return Transcriber.stripWhisperMarkers(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Builds the multipart/form-data body for POST /inference.
+    /// Exposed for unit tests.
+    static func buildMultipartBody(
+        audioURL: URL,
+        boundary: String,
+        language: String,
+        prompt: String?,
+        beamSize: Int?
+    ) throws -> (body: Data, contentType: String) {
+        var body = Data()
+
+        func append(_ chunk: String) {
+            body.append(chunk.data(using: .utf8)!)
+        }
+
+        let filename = audioURL.lastPathComponent
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        append("Content-Type: \(Self.mimeForPath(filename))\r\n\r\n")
+        body.append(try Data(contentsOf: audioURL))
+        append("\r\n")
+
+        func appendScalar(_ name: String, _ value: String) {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+            append("\(value)\r\n")
+        }
+
+        if !language.isEmpty {
+            appendScalar("language", language)
+        }
+        if let prompt, !prompt.isEmpty {
+            appendScalar("prompt", prompt)
+        }
+        if let beamSize {
+            appendScalar("beam_size", "\(beamSize)")
+        }
+
+        append("--\(boundary)--\r\n")
+        return (body, "multipart/form-data; boundary=\(boundary)")
+    }
+
+    private static func mimeForPath(_ path: String) -> String {
+        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        case "wav": return "audio/wav"
+        case "mp3": return "audio/mpeg"
+        case "m4a", "mp4", "aac": return "audio/mp4"
+        case "ogg", "oga": return "audio/ogg"
+        case "flac": return "audio/flac"
+        default: return "application/octet-stream"
+        }
     }
 
     func arguments(modelPath: String, audioURL: URL) -> [String] {
@@ -173,6 +331,11 @@ enum TranscriberError: LocalizedError {
     case whisperNotFound
     case modelNotFound(String)
     case transcriptionFailed
+    /// The persistent whisper-server could not be reached at the network
+    /// level (connection refused, host not found, timeout). Carries the
+    /// underlying `URLError.Code` raw value so callers can distinguish it
+    /// from application-level (HTTP 5xx) failures.
+    case serverUnavailable(code: Int?)
 
     var errorDescription: String? {
         switch self {
@@ -182,6 +345,8 @@ enum TranscriberError: LocalizedError {
             return "Whisper model '\(size)' not found. Download it with: open-wispr download-model \(size)"
         case .transcriptionFailed:
             return "Transcription failed"
+        case .serverUnavailable(let code):
+            return "whisper-server unavailable (URLError code \(code.map(String.init) ?? "unknown"))"
         }
     }
 }
