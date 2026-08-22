@@ -31,27 +31,52 @@ final class LatencyTrackerTests: XCTestCase {
         XCTAssertEqual(t.summary(), "latency: total=50ms (capture=50ms)")
     }
 
-    func testWavDurationFromFileSize() throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("latency-\(UUID().uuidString).wav")
-        // 44-byte header + 1 second of 16 kHz mono 16-bit PCM.
-        let data = Data(count: 44 + 32000)
-        try data.write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
+    /// 16 kHz mono 16-bit PCM WAV; `padding` mimics the JUNK/FLLR chunks
+    /// AVAudioFile writes before the audio data.
+    private func makeWav(dataBytes: Int, padding: Int = 0) -> Data {
+        func le32(_ v: UInt32) -> Data { Data([UInt8(v & 0xff), UInt8((v >> 8) & 0xff), UInt8((v >> 16) & 0xff), UInt8((v >> 24) & 0xff)]) }
+        func le16(_ v: UInt16) -> Data { Data([UInt8(v & 0xff), UInt8((v >> 8) & 0xff)]) }
 
-        let duration = try XCTUnwrap(LatencyTrace.wavDuration(at: url))
-        XCTAssertEqual(duration, 1.0, accuracy: 0.001)
+        var fmt = Data("fmt ".utf8) + le32(16)
+        fmt += le16(1) + le16(1) + le32(16000) + le32(32000) + le16(2) + le16(16)
+
+        var body = Data()
+        if padding > 0 {
+            body += Data("JUNK".utf8) + le32(UInt32(padding)) + Data(count: padding)
+        }
+        body += fmt
+        body += Data("data".utf8) + le32(UInt32(dataBytes)) + Data(count: dataBytes)
+
+        return Data("RIFF".utf8) + le32(UInt32(4 + body.count)) + Data("WAVE".utf8) + body
     }
 
-    func testWavDurationIsNilForMissingOrHeaderOnlyFile() throws {
+    private func writeTemp(_ data: Data) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("latency-\(UUID().uuidString).wav")
+        try data.write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testWavDurationFromDataChunk() throws {
+        let url = try writeTemp(makeWav(dataBytes: 32000))
+        XCTAssertEqual(try XCTUnwrap(LatencyTrace.wavDuration(at: url)), 1.0, accuracy: 0.001)
+    }
+
+    func testWavDurationIgnoresPaddingChunksBeforeAudio() throws {
+        let url = try writeTemp(makeWav(dataBytes: 67200, padding: 4008))
+        XCTAssertEqual(try XCTUnwrap(LatencyTrace.wavDuration(at: url)), 2.1, accuracy: 0.001)
+    }
+
+    func testWavDurationIsNilForMissingOrInvalidFile() throws {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("missing-\(UUID().uuidString).wav")
         XCTAssertNil(LatencyTrace.wavDuration(at: missing))
 
-        let headerOnly = FileManager.default.temporaryDirectory
-            .appendingPathComponent("header-\(UUID().uuidString).wav")
-        try Data(count: 44).write(to: headerOnly)
-        defer { try? FileManager.default.removeItem(at: headerOnly) }
-        XCTAssertNil(LatencyTrace.wavDuration(at: headerOnly))
+        let notWav = try writeTemp(Data(count: 4096))
+        XCTAssertNil(LatencyTrace.wavDuration(at: notWav))
+
+        let empty = try writeTemp(makeWav(dataBytes: 0))
+        XCTAssertNil(LatencyTrace.wavDuration(at: empty))
     }
 }
