@@ -44,8 +44,9 @@
                                                  ▼
                                      ┌────────────────────────┐
                                      │  whisper-server :8123  │
-                                     │  whisper.cpp + Metal   │
-                                     │  модель в RAM (small)  │
+                                     │  whisper.cpp + CoreML  │
+                                     │  turbo-q8_0 в RAM,     │
+                                     │  энкодер на ANE        │
                                      └────────────────────────┘
 ```
 
@@ -53,11 +54,11 @@
 
 | Компонент | Путь | Роль |
 |---|---|---|
-| Демон | `OpenWispr.app` (из `scripts/bundle-app.sh`) | хоткей, запись, вставка текста |
+| Демон | `~/openwispr-fast/OpenWispr.app` (из `scripts/bundle-app.sh`) | хоткей, запись, вставка текста |
 | Сервер | `~/openwispr-fast/build/whisper.cpp/build-coreml/bin/whisper-server` | транскрипция, порт **8123**, CoreML |
 | Фолбэк | `/opt/homebrew/bin/whisper-cli` | транскрипция при падении сервера |
 | Конфиг | `~/.config/open-wispr/config.json` | хоткей, язык, beam, URL сервера |
-| Модели | `~/.config/open-wispr/models/` | small, medium-q5_0, large-v3-turbo |
+| Модели | `~/.config/open-wispr/models/` | turbo-q8_0 + CoreML-энкодер (`*.mlmodelc`), small, medium-q5_0 |
 | Записи | `~/.config/open-wispr/recordings/` | последние 10 WAV |
 | Логи | `~/openwispr-fast/logs/` | `openwispr.log`, `whisper-server.log` |
 | LaunchAgents | `~/Library/LaunchAgents/local.openwispr.*.plist` | демон + сервер (KeepAlive) |
@@ -81,27 +82,27 @@
 ### ✅ Работает
 
 - **E2E-пайплайн:** Fn long-press → речь → транскрипция → текст в приложении (подтверждено вживую).
-- **Latency:** транскрипция **0.25–0.41 с** на модели `small` (0.9 с аудио → 0.25 с; 2.8 с аудио → 0.35 с).
-  Целевой порог 500 мс по этапу инференса **выполнен**.
+- **Latency:** транскрипция **0.55–0.60 с** на `large-v3-turbo-q8_0` с CoreML-энкодером;
+  полный цикл в бою **644–710 мс**.
 - **Сервер:** `whisper-server` из собственной сборки whisper.cpp v1.9.2 **с CoreML**,
   модель `large-v3-turbo-q8_0` + CoreML-энкодер на Neural Engine, порт 8123, KeepAlive.
   Ставится скриптом `scripts/setup-fast-server.sh`.
 - **Демон:** хоткей **Fn**, `language=ru`, `beam_size=5`, `whisperPrompt` (см. ниже),
   режим «зажать → отпустить».
-- **Тесты:** 135/135 (Transcriber + multipart-сборка + фолбэк-логика + LatencyTrace).
+- **Тесты:** 136/136 (Transcriber + multipart-сборка + фолбэк-логика + LatencyTrace).
 - **Измерение полного цикла:** после каждой диктовки демон пишет в лог строку
   «отпустил клавишу → текст в приложении». Смотреть: `grep '^latency:' ~/openwispr-fast/logs/openwispr.log`.
 
-  Живые замеры (v0.44.0, `small`, `beam_size=5`):
+  Живые замеры на боевой конфигурации (turbo-q8_0 + CoreML + промпт):
 
   ```
-  latency: total=479ms  (capture=13ms transcribe=434ms insert=33ms) audio=3.9s chars=28
-  latency: total=1708ms (capture=6ms  transcribe=1697ms insert=4ms) audio=1.5s chars=14
+  latency: total=677ms (capture=10ms transcribe=660ms insert=8ms)  audio=2.2s chars=29
+  latency: total=644ms (capture=6ms  transcribe=629ms insert=10ms) audio=2.4s chars=31
+  latency: total=710ms (capture=10ms transcribe=695ms insert=5ms)  audio=3.1s chars=21
   ```
 
-  **Цель ≤ 500 мс выполнена в типичном случае.** Запись и вставка почти бесплатны
-  (6–13 мс + 4–33 мс, ~10 % цикла), остальное — транскрипция.
-  Второй замер — выброс, см. риск #5.
+  Запись и вставка почти бесплатны (6–17 мс + 4–21 мс, ~3 % цикла), остальное — транскрипция.
+  На `small` те же этапы давали 375–485 мс общего цикла, но с ошибками на быстрой речи.
 - **Live-установка собирается из этого репозитория** (`~/code/my/whisper-clone`), а не из `/tmp`;
   приложение установлено в `~/openwispr-fast/OpenWispr.app` (путь стабилен ради TCC-гранта).
 
