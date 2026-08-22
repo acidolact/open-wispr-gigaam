@@ -298,17 +298,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRecordingStop() {
+        var trace = LatencyTrace()
+
         guard let audioURL = recorder.stopRecording() else {
             RecordingCancellation.discardTrackedPartialRecording(&currentRecordingURL)
             statusBar.state = .idle
             return
         }
+        trace.markAudioReady()
 
         currentRecordingURL = nil
         statusBar.state = .transcribing
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
+            let audioSeconds = LatencyTrace.wavDuration(at: audioURL)
             let maxRecordings = Config.effectiveMaxRecordings(self.config.maxRecordings)
             defer {
                 if maxRecordings == 0 {
@@ -317,6 +321,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
             do {
                 let raw = try self.transcriber.transcribe(audioURL: audioURL)
+                trace.markTranscribed()
                 let text = (self.config.spokenPunctuation?.value ?? false) ? TextPostProcessor.process(raw) : raw
                 if maxRecordings > 0 {
                     RecordingStore.prune(maxCount: maxRecordings)
@@ -326,6 +331,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         self.lastTranscription = text
                         self.inserter.insert(text: text)
                     }
+                    trace.markInserted()
+                    print(trace.summary(audioSeconds: audioSeconds, characters: text.count))
                     self.statusBar.state = .idle
                     self.statusBar.buildMenu()
                 }

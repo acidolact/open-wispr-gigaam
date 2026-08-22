@@ -3,7 +3,7 @@
 > Диктовка голосом на macOS (Apple Silicon): зажать клавишу → говорить → отпустить → текст печатается в активное приложение.
 > Форк [human37/open-wispr](https://github.com/human37/open-wispr), доработанный под локальный быстрый пайплайн на `whisper.cpp`.
 >
-> Актуально на: **22.08.2026**, HEAD: `2a5bbdf`.
+> Актуально на: **22.08.2026**, HEAD: `11104dd`+.
 
 ---
 
@@ -26,8 +26,8 @@
 | 5 | Автозапуск демона + whisper-server (LaunchAgents) | ✅ |
 | 6 | Latency ≤ 500 мс | ✅ (см. замеры) |
 | 7 | Фолбэк на whisper-cli при падении сервера | ✅ |
-| 8 | Измерение полного цикла с таймстемпами | ⏳ |
-| 9 | Перенос live-установки из /tmp, README/UX polish, git tag | ⏳ |
+| 8 | Измерение полного цикла с таймстемпами | ✅ |
+| 9 | Перенос live-установки из /tmp, README/UX polish, git tag | ✅ (сборка из репозитория) |
 
 ## 3. Архитектура
 
@@ -73,6 +73,7 @@
 | `Sources/OpenWisprLib/TextInserter.swift` | вставка текста (CGEvent) |
 | `Sources/OpenWisprLib/RecordingStore.swift` | хранение/прuning записей |
 | `Sources/OpenWisprLib/Config.swift` | `config.json`, `set-hotkey`/`get-hotkey` |
+| `Sources/OpenWisprLib/LatencyTracker.swift` | таймстемпы цикла «отпустил клавишу → текст» в лог |
 
 ## 4. Текущее состояние (22.08.2026)
 
@@ -82,8 +83,14 @@
 - **Latency:** транскрипция **0.25–0.41 с** на модели `small` (0.9 с аудио → 0.25 с; 2.8 с аудио → 0.35 с).
   Целевой порог 500 мс по этапу инференса **выполнен**.
 - **Сервер:** `whisper-server` на `small` (ggml-small.bin), флага `-bs 1 -nt`, порт 8123, KeepAlive.
-- **Демон:** хоткей **Fn**, `language=ru`, `beam_size=5`, режим «зажать → отпустить».
-- **Тесты:** 129/129 (Transcriber + multipart-сборка + фолбэк-логика).
+- **Демон:** хоткей **Fn**, `language=ru`, `beam_size=5`, `modelSize=small`, режим «зажать → отпустить».
+- **Тесты:** 135/135 (Transcriber + multipart-сборка + фолбэк-логика + LatencyTrace).
+- **Измерение полного цикла:** после каждой диктовки демон пишет в лог строку вида
+  `latency: total=612ms (capture=18ms transcribe=352ms insert=242ms) audio=2.8s chars=41`
+  — этапы: остановка записи/закрытие WAV → транскрипция → вставка текста.
+  Смотреть: `grep latency: ~/openwispr-fast/logs/openwispr.log`.
+- **Live-установка собирается из этого репозитория** (`~/code/my/whisper-clone`), а не из `/tmp`;
+  приложение установлено в `~/openwispr-fast/OpenWispr.app` (путь стабилен ради TCC-гранта).
 
 ### 📊 A/B моделей (одна и та же фраза, порт 8123)
 
@@ -109,18 +116,17 @@
    принимался сервером. После рестарта демона ошибки исчезли. **Корневая причина не установлена** —
    если 400 вернётся, ловить запрос через прокси на 8124 (методика: перехват тела+заголовков,
    бисекция заголовков).
-3. **Live-сборка в `/tmp/open-wispr`.** `/tmp` может быть очищен системой;
-   этот каталог (`~/code/my/whisper-clone`) — постоянное хранилище.
+3. ~~**Live-сборка в `/tmp/open-wispr`.**~~ Закрыто: сборка идёт из `~/code/my/whisper-clone`,
+   исходники в `/tmp/open-wispr` были байт-в-байт идентичны и больше не нужны.
 4. **`open -n --args` ловушка.** LaunchServices подставляет `-psn_…`, ломающий CLI-диспетчер.
    Запускать прямой бинарник (`.../Contents/MacOS/open-wispr`).
 
 ### 📋 Next steps
 
-1. **Перенести live-установку из `/tmp/open-wispr`** в `~/code/my/whisper-clone`
-   (пересобрать, пересигнуть, пересоздать LaunchAgents, перегрантить TCC — одним махом).
-2. Измерить полный цикл «отпустил клавишу → текст» с таймстемпами в логе демона.
-3. Опционально: `--port` флаг, `start`/`stop` UX, git tag v0.44.0.
-4. Следить за аномалией 400 (риск #2).
+1. Собрать реальные замеры `latency:` из лога за день использования и свести таблицу
+   (сколько из них укладывается в 500 мс полного цикла, а не только инференса).
+2. Опционально: `--port` флаг, `start`/`stop` UX.
+3. Следить за аномалией 400 (риск #2).
 
 ## 5. Сборка и запуск из этого каталога
 
@@ -129,6 +135,12 @@ brew install whisper-cpp          # whisper-cli + whisper-server
 swift build -c release
 scripts/bundle-app.sh .build/release/open-wispr OpenWispr.app 0.44.0
 codesign --force --deep -s - OpenWispr.app
+
+# установка в live-каталог (путь фиксирован в LaunchAgent и в TCC-гранте):
+launchctl bootout gui/$(id -u)/local.openwispr.app
+rm -rf ~/openwispr-fast/OpenWispr.app
+cp -R OpenWispr.app ~/openwispr-fast/OpenWispr.app
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.openwispr.app.plist
 
 # запуск вручную (без LaunchAgents):
 OpenWispr.app/Contents/MacOS/open-wispr listen
