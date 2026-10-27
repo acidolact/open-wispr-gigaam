@@ -209,6 +209,17 @@
 3. Опционально: `--port` флаг, `start`/`stop` UX.
 4. Следить за аномалией 400 (риск #2) и выбросом ×5 (риск #5).
 
+## 4a. GigaAM (27.10.2026)
+
+Боевой распознаватель переключён на **GigaAM-v3 e2e RNNT** (onnx-asr, CPU).
+Sidecar говорит тем же `POST /inference`, что и whisper-server.
+
+- Живой URL: `http://127.0.0.1:8124` (`whisperServerURL` в config.json)
+- Установщик: `bash scripts/install-gigaam.sh` — см. [docs/install-gigaam.md](docs/install-gigaam.md)
+- Live-префикс: `~/openwispr-fast/` (приложение + копия `gigaam_server.py`, без зависимости от git checkout)
+- CoreML EP onnxruntime на этом графе падает; CPU даёт ~30–60 мс на фразу
+- `whisper-cpp` для этой сборки не нужен; старый LaunchAgent whisper-server отключается установщиком
+
 ## 5. Сборка и запуск из этого каталога
 
 ```bash

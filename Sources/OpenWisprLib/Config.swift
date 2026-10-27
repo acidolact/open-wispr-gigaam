@@ -30,6 +30,15 @@ public struct Config: Codable {
             .joined(separator: " · ")
     }
 
+    /// True when transcription is delegated to an HTTP sidecar (whisper-server or GigaAM).
+    /// Local whisper-cli and GGML weights are then optional (CLI fallback only).
+    public var usesExternalTranscriber: Bool {
+        guard let raw = whisperServerURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty,
+              URL(string: raw) != nil else { return false }
+        return true
+    }
+
     private static func deduplicateHotkeys(_ list: [HotkeyConfig]) -> [HotkeyConfig] {
         var out: [HotkeyConfig] = []
         for h in list where !out.contains(h) {

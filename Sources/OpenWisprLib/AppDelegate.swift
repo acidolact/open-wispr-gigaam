@@ -58,7 +58,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusBar.buildMenu()
         }
 
-        if Transcriber.findWhisperBinary() == nil {
+        if !config.usesExternalTranscriber, Transcriber.findWhisperBinary() == nil {
             print("Error: whisper-cpp not found. Install it with: brew install whisper-cpp")
             return
         }
@@ -91,7 +91,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             print("Accessibility: granted")
         }
 
-        if !Transcriber.modelExists(modelSize: config.modelSize) {
+        if !config.usesExternalTranscriber, !Transcriber.modelExists(modelSize: config.modelSize) {
             DispatchQueue.main.async {
                 self.statusBar.state = .downloading
                 self.statusBar.updateDownloadProgress("Downloading \(self.config.modelSize) model...")
@@ -108,7 +108,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        if let modelPath = Transcriber.findModel(modelSize: config.modelSize) {
+        if !config.usesExternalTranscriber, let modelPath = Transcriber.findModel(modelSize: config.modelSize) {
             let modelURL = URL(fileURLWithPath: modelPath)
             if !ModelDownloader.isValidGGMLFile(at: modelURL) {
                 let msg = "Model file is corrupted. Re-download with: open-wispr download-model \(config.modelSize)"
@@ -205,7 +205,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             hotkeyManagers.append(manager)
         }
 
-        if !wasDownloading && !Transcriber.modelExists(modelSize: config.modelSize) {
+        if !config.usesExternalTranscriber && !wasDownloading && !Transcriber.modelExists(modelSize: config.modelSize) {
             statusBar.state = .downloading
             statusBar.updateDownloadProgress("Downloading \(config.modelSize) model...")
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in

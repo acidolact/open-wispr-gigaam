@@ -369,6 +369,40 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(obj?["hotkey"])
         XCTAssertNotNil(obj?["hotkeys"])
     }
+
+    func testUsesExternalTranscriberWhenServerURLSet() throws {
+        let json = """
+        {
+            "hotkey": {"keyCode": 63, "modifiers": []},
+            "modelSize": "small",
+            "language": "ru",
+            "whisperServerURL": "http://127.0.0.1:8124"
+        }
+        """.data(using: .utf8)!
+        let config = try Config.decode(from: json)
+        XCTAssertTrue(config.usesExternalTranscriber)
+    }
+
+    func testUsesExternalTranscriberFalseWhenMissingOrBlank() throws {
+        let missing = """
+        {
+            "hotkey": {"keyCode": 63, "modifiers": []},
+            "modelSize": "small",
+            "language": "ru"
+        }
+        """.data(using: .utf8)!
+        XCTAssertFalse(try Config.decode(from: missing).usesExternalTranscriber)
+
+        let blank = """
+        {
+            "hotkey": {"keyCode": 63, "modifiers": []},
+            "modelSize": "small",
+            "language": "ru",
+            "whisperServerURL": "   "
+        }
+        """.data(using: .utf8)!
+        XCTAssertFalse(try Config.decode(from: blank).usesExternalTranscriber)
+    }
 }
 
 private struct FlexBoolWrapper: Codable {
