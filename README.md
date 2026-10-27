@@ -10,7 +10,7 @@
   Everything runs on-device. No audio or text ever leaves your machine.
 </p>
 
-> **This fork (Russian / GigaAM):** dictation goes through on-device [GigaAM-v3](https://github.com/salute-developers/GigaAM). Install on this Mac or another: **[docs/install-gigaam.md](docs/install-gigaam.md)** — `bash scripts/install-gigaam.sh`.
+> **This fork (Russian / GigaAM):** dictation goes through on-device [GigaAM-v3](https://github.com/salute-developers/GigaAM). Repo: [acidolact/open-wispr-gigaam](https://github.com/acidolact/open-wispr-gigaam). Install: **[docs/install-gigaam.md](docs/install-gigaam.md)** — `bash scripts/install-gigaam.sh`.
 
 <p align="center">Powered by <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a> with Metal acceleration on Apple Silicon.</p>
 

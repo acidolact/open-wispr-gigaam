@@ -7,8 +7,8 @@
 Нужны macOS 13+, сеть для первой загрузки модели (~300 MB), Homebrew (`uv`) и Swift / Xcode CLT.
 
 ```bash
-git clone <url-этого-репозитория>
-cd <каталог>
+git clone https://github.com/acidolact/open-wispr-gigaam.git
+cd open-wispr-gigaam
 bash scripts/install-gigaam.sh
 ```
 
@@ -33,7 +33,9 @@ bash scripts/uninstall-gigaam.sh --purge  # плюс конфиг и кэш мо
 
 ## Поделиться и поставить на другой Mac
 
-Репозиторий — единица поставки. На второй машине тот же `git clone` и `bash scripts/install-gigaam.sh`.
+Репозиторий: https://github.com/acidolact/open-wispr-gigaam
+
+На второй машине тот же `git clone` и `bash scripts/install-gigaam.sh`.
 
 Без git:
 
